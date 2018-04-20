@@ -1,18 +1,18 @@
 module Main where
 
 import Lib
-import Data.Text.Lazy.Encoding
-import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as TIO
+import Data.Text.Encoding
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import qualified Data.ByteString.Lazy as BSL
 import Data.List
+import Data.Monoid
 import Network.SSH.Client.LibSSH2
 
 main :: IO ()
 main = do
   size <- testSSH2User testScp
   putStr $ show size
-
-
 
 testSSH2User :: (Session -> IO a) -> IO a
 testSSH2User = withSSH2User "" "" "" "" 22
@@ -27,25 +27,42 @@ scpReceive src dest s = do
       destPath = dest ++ fileRequested
   scpReceiveFile s srcPath destPath
 
--- mess but it works, refactor, make sure to use <> and stay with text all the way through
--- need IO Text type sig
 findFileToRequest :: FilePath -> Session -> IO String
 findFileToRequest src s = do
   putStrLn $ "Looking in " ++ src ++ ":"
   let lsCmd = "ls " ++ src
   (_, (x:_)) <- execCommands s [lsCmd]
-  TIO.putStrLn $ decodeUtf8 x
+  TIO.putStrLn $ decodeUtf8 $ BSL.toStrict x
   putStrLn "grep: "
   toGrep <- getLine
-  (_, (y:_)) <- execCommands s [lsCmd ++ " | grep -i " ++ toGrep]
-  let files        = T.lines $ decodeUtf8 y
-      indexedFiles = zipWith (\x n -> (n, show n ++ " " ++ T.unpack x)) files [1..]
-  putStrLn $ unlines (map snd indexedFiles)
-  putStrLn "Please enter the index of what you would like to download."
-  index <- getLine
-  let selectedFile = getFile $ find (\(n, _) -> n == (read index)) indexedFiles
-  return $ "/" ++ (drop 2 $ snd selectedFile)
+  let grepFiles = lsCmd ++ " -p | grep -iv / | grep -i " ++ toGrep
+      grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport | grep -i " ++ toGrep
+  (_, (y:_)) <- execCommands s [grepFiles]
+  (_, (z:_)) <- execCommands s [grepDirs]
+  let files        = indexFiles y
+      dirs         = indexFiles z
+  mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs), ""]
+  putStrLn "Please enter the f for files, or d for dirs, plus the index of what you would like to download."
+  (c:i) <- getLine
+  let index = read i :: Int
+  case c of
+    'f' -> return $ "/" ++ getFile index files
+    'd' -> findFileToRequest (src ++ "/" ++ getFile index dirs) s
+    _   -> error "Not selected file or dir"
 
-getFile :: Maybe (a, b) -> (a, b)
-getFile Nothing = error "Failed to retrieve file"
-getFile (Just v) = v
+getFile :: Int -> [(Int, String)] -> String
+getFile index = removeIndex False . snd . retrieveFile . find (\(n, _) -> n == index)
+  where
+    retrieveFile Nothing  = error "Failed to retrieve file"
+    retrieveFile (Just v) = v
+
+indexFiles :: BSL.ByteString -> [(Int, String)]
+indexFiles files = zipWith (\x n -> (n, show n ++ " " ++ T.unpack x)) decodedFiles [1..]
+  where
+    decodedFiles = T.lines $ decodeUtf8 $ BSL.toStrict files
+
+removeIndex :: String -> String
+removeIndex False (x:xs) = remInd (x == ' ') xs
+removeIndex True str@(x:xs)
+  | x /= ' '  = str
+  | otherwise = remInd True xs
