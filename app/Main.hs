@@ -7,6 +7,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.ByteString.Lazy as BSL
 import Data.List
 import Data.Monoid
+import Control.Monad
 import Network.SSH.Client.LibSSH2
 
 main :: IO ()
@@ -31,16 +32,14 @@ findFileToRequest :: FilePath -> Session -> IO String
 findFileToRequest src s = do
   putStrLn $ "Looking in " ++ src ++ ":"
   let lsCmd = "ls " ++ src
-  (_, (x:_)) <- execCommands s [lsCmd]
-  TIO.putStrLn $ decodeUtf8 $ BSL.toStrict x
+  lsOutput <- execCmd s lsCmd
+  TIO.putStrLn lsOutput
   putStrLn "grep: "
   toGrep <- getLine
   let grepFiles = lsCmd ++ " -p | grep -iv / | grep -i " ++ toGrep
       grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport | grep -i " ++ toGrep
-  (_, (y:_)) <- execCommands s [grepFiles]
-  (_, (z:_)) <- execCommands s [grepDirs]
-  let files        = indexFiles y
-      dirs         = indexFiles z
+  files <- liftM indexFiles $ execCmd s grepFiles
+  dirs <- liftM indexFiles $ execCmd s grepDirs
   mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs), ""]
   putStrLn "Please enter the f for files, or d for dirs, plus the index of what you would like to download."
   (c:i) <- getLine
@@ -50,19 +49,22 @@ findFileToRequest src s = do
     'd' -> findFileToRequest (src ++ "/" ++ getFile index dirs) s
     _   -> error "Not selected file or dir"
 
+execCmd :: Session -> String -> IO T.Text
+execCmd s cmd = do
+  (_, (x:_)) <- execCommands s [cmd]
+  return $ decodeUtf8 $ BSL.toStrict x
+
 getFile :: Int -> [(Int, String)] -> String
 getFile index = removeIndex False . snd . retrieveFile . find (\(n, _) -> n == index)
   where
     retrieveFile Nothing  = error "Failed to retrieve file"
     retrieveFile (Just v) = v
 
-indexFiles :: BSL.ByteString -> [(Int, String)]
-indexFiles files = zipWith (\x n -> (n, show n ++ " " ++ T.unpack x)) decodedFiles [1..]
-  where
-    decodedFiles = T.lines $ decodeUtf8 $ BSL.toStrict files
+indexFiles :: T.Text -> [(Int, String)]
+indexFiles f = zipWith (\x n -> (n, show n ++ " " ++ T.unpack x)) (T.lines f) [1..]
 
-removeIndex :: String -> String
-removeIndex False (x:xs) = remInd (x == ' ') xs
+removeIndex :: Bool -> String -> String
+removeIndex False (x:xs) = removeIndex (x == ' ') xs
 removeIndex True str@(x:xs)
   | x /= ' '  = str
-  | otherwise = remInd True xs
+  | otherwise = removeIndex True xs
