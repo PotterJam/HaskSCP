@@ -5,6 +5,7 @@ import Data.Text.Encoding
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.ByteString.Lazy as BSL
+import Text.Read (readMaybe)
 import Data.List
 import Data.Monoid
 import Control.Monad
@@ -42,12 +43,17 @@ findFileToRequest src s = do
   dirs <- liftM indexFiles $ execCmd s grepDirs
   mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs), ""]
   putStrLn "Please enter the f for files, or d for dirs, plus the index of what you would like to download."
-  (c:i) <- getLine
-  let index = read i :: Int
-  case c of
-    'f' -> return $ "/" ++ getFile index files
-    'd' -> findFileToRequest (src ++ "/" ++ getFile index dirs) s
-    _   -> error "Not selected file or dir"
+  fileSelection <- getLine
+  let selection = parseSelection fileSelection
+  case selection of
+    Left (Just n)  -> return $ "/" ++ getFile n files
+    Right (Just n) -> findFileToRequest (src ++ "/" ++ getFile n dirs) s
+    Left Nothing   -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
+    Right Nothing  -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
+
+parseSelection :: String -> Either (Maybe Int) (Maybe Int)
+parseSelection ('d':xs) = Right $ readMaybe xs
+parseSelection xs       = Left $ readMaybe xs
 
 execCmd :: Session -> String -> IO T.Text
 execCmd s cmd = do
