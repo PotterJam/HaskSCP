@@ -6,6 +6,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.ByteString.Lazy as BSL
 import Text.Read (readMaybe)
+import System.FilePath.Posix
 import Data.List
 import Data.Monoid
 import Control.Monad
@@ -17,16 +18,16 @@ main = do
   putStr $ show size
 
 testSSH2User :: (Session -> IO a) -> IO a
-testSSH2User = withSSH2User "" "" "" "" 22
+testSSH2User = withSSH2User "/home/james/Scripts" "chorizo" "IE9uzO1NVeAx1j2B" "gyges.feralhosting.com" 22
 
 testScp :: Session -> IO Integer
-testScp = scpReceive "" ""
+testScp = scpReceive "/media/sdx1/chorizo/private/rtorrent/data" "/home/james/Downloads"
 
 scpReceive :: FilePath -> FilePath -> Session -> IO Integer
 scpReceive src dest s = do
   fileRequested <- findFileToRequest src s
-  let srcPath  = src ++ fileRequested
-      destPath = dest ++ fileRequested
+  let srcPath  = src </> fileRequested
+      destPath = dest </> fileRequested
   scpReceiveFile s srcPath destPath
 
 findFileToRequest :: FilePath -> Session -> IO String
@@ -41,19 +42,18 @@ findFileToRequest src s = do
       grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport | grep -i " ++ toGrep
   files <- liftM indexFiles $ execCmd s grepFiles
   dirs <- liftM indexFiles $ execCmd s grepDirs
-  mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs), ""]
+  mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs)]
   putStrLn "Please enter the f for files, or d for dirs, plus the index of what you would like to download."
   fileSelection <- getLine
   let selection = parseSelection fileSelection
   case selection of
-    Left (Just n)  -> return $ "/" ++ getFile n files
-    Right (Just n) -> findFileToRequest (src ++ "/" ++ getFile n dirs) s
-    Left Nothing   -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
-    Right Nothing  -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
+    Just (Left n)  -> return $ getFile n files
+    Just (Right n) -> findFileToRequest (src </> getFile n dirs) s
+    Nothing        -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
 
-parseSelection :: String -> Either (Maybe Int) (Maybe Int)
-parseSelection ('d':xs) = Right $ readMaybe xs
-parseSelection xs       = Left $ readMaybe xs
+parseSelection :: String -> Maybe (Either Int Int)
+parseSelection ('d':xs) = Right <$> readMaybe xs
+parseSelection xs       = Left <$> readMaybe xs
 
 execCmd :: Session -> String -> IO T.Text
 execCmd s cmd = do
