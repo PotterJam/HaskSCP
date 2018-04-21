@@ -18,38 +18,42 @@ main = do
   putStr $ show size
 
 testSSH2User :: (Session -> IO a) -> IO a
-testSSH2User = withSSH2User "/home/james/Scripts" "chorizo" "IE9uzO1NVeAx1j2B" "gyges.feralhosting.com" 22
+testSSH2User = withSSH2User "" "" "" "" 22
 
 testScp :: Session -> IO Integer
-testScp = scpReceive "/media/sdx1/chorizo/private/rtorrent/data" "/home/james/Downloads"
+testScp = scpReceive "" ""
 
 scpReceive :: FilePath -> FilePath -> Session -> IO Integer
 scpReceive src dest s = do
+  printLs src s
   fileRequested <- findFileToRequest src s
   let srcPath  = src </> fileRequested
       destPath = dest </> fileRequested
   scpReceiveFile s srcPath destPath
 
+printLs :: FilePath -> Session -> IO ()
+printLs path s = do
+  putStrLn $ "Looking in " ++ path ++ ":"
+  lsOutput <- execCmd s ("ls " ++ path)
+  TIO.putStrLn lsOutput
+
 findFileToRequest :: FilePath -> Session -> IO String
 findFileToRequest src s = do
-  putStrLn $ "Looking in " ++ src ++ ":"
-  let lsCmd = "ls " ++ src
-  lsOutput <- execCmd s lsCmd
-  TIO.putStrLn lsOutput
   putStrLn "grep: "
   toGrep <- getLine
-  let grepFiles = lsCmd ++ " -p | grep -iv / | grep -i " ++ toGrep
+  let grepFiles = "ls -p " ++ src ++ "| grep -iv / | grep -i " ++ toGrep
       grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport | grep -i " ++ toGrep
   files <- liftM indexFiles $ execCmd s grepFiles
   dirs <- liftM indexFiles $ execCmd s grepDirs
   mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs)]
-  putStrLn "Please enter the f for files, or d for dirs, plus the index of what you would like to download."
+  putStrLn "Please enter the index for files, or d for dirs, plus the index of what you would like to download."
   fileSelection <- getLine
   let selection = parseSelection fileSelection
   case selection of
     Just (Left n)  -> return $ getFile n files
-    Just (Right n) -> findFileToRequest (src </> getFile n dirs) s
-    Nothing        -> error "File selection failed.\n" --TODO: recurse, perhaps save state and redo
+    Just (Right n) -> printLs (src </> getFile n dirs) s
+                      >> findFileToRequest (src </> getFile n dirs) s
+    Nothing        -> findFileToRequest src s
 
 parseSelection :: String -> Maybe (Either Int Int)
 parseSelection ('d':xs) = Right <$> readMaybe xs
