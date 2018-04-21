@@ -41,8 +41,9 @@ findFileToRequest :: FilePath -> Session -> IO String
 findFileToRequest src s = do
   putStrLn "grep: "
   toGrep <- getLine
-  let grepFiles = "ls -p " ++ src ++ "| grep -iv / | grep -i " ++ toGrep
-      grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport | grep -i " ++ toGrep
+  let grepStr   = if toGrep == "" then "" else "| grep -i " ++ toGrep
+      grepFiles = "ls -p " ++ src ++ "| grep -iv / " ++ grepStr
+      grepDirs  = "tree " ++ src ++ " -d -L 1 -i --noreport " ++ grepStr
   files <- liftM indexFiles $ execCmd s grepFiles
   dirs <- liftM indexFiles $ execCmd s grepDirs
   mapM_ putStrLn ["Files:", (unlines $ map snd files), "", "Dirs:", (unlines $ map snd dirs)]
